@@ -1,10 +1,11 @@
-// src/app/characters.tsx
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   BackHandler,
+  Image,
+  type ImageSourcePropType,
   Modal,
   Platform,
   ScrollView,
@@ -12,144 +13,185 @@ import {
   Text,
   TouchableOpacity,
   View,
-} from 'react-native';
-import CustomFooter from './components/CustomFooter';
-import CustomHeader from './components/CustomHeader';
+  useWindowDimensions,
+} from "react-native";
+import CustomFooter from "./components/CustomFooter";
+import { apiGet } from "../services/api";
 
-const CHARACTERS_URL = 'https://menu-nu-coral.vercel.app/';
+interface PersonajeApi {
+  pkPersonaje: number;
+  nombre: string;
+  slug: string;
+  agresividad: string;
+  rol: string;
+  puntosSalud: number;
+  descripcion: string | null;
+  historia: string | null;
+  publicado: boolean;
+}
 
 interface CharacterRecord {
-  id: string;
+  id: number;
   initials: string;
   nombre: string;
   rol: string;
-  salud: string;
+  salud: number;
   actitud: string;
-  apariciones: string[];
-  acciones: string[];
-  habilidades: string[];
   descripcion: string;
+  historia: string;
+  frameSource: ImageSourcePropType | null;
 }
 
-// Salud y actitud configuradas manualmente por personaje
-const CHARACTERS_DATA: CharacterRecord[] = [
-  {
-    id: 'jack-veil',
-    initials: 'JV',
-    nombre: 'Jack Veil',
-    rol: 'Protagonista',
-    salud: '100',
-    actitud: 'Sin IA',
-    apariciones: ['Todos'],
-    acciones: ['Caminar', 'Correr', 'Saltar', 'Atacar'],
-    habilidades: [
-      'Ataque Corto',
-      'Ataque Intermedio (Golpe)',
-      'Ataque a Distancia (Proyectil o Laser)',
-    ],
-    descripcion: 'Registro de personaje operativo en Metronia (2943).',
-  },
-  {
-    id: 'doctor',
-    initials: 'D',
-    nombre: 'Doctor',
-    rol: 'NPC',
-    salud: '—',
-    actitud: 'Sin IA',
-    apariciones: ['Nivel 1'],
-    acciones: ['Observar', 'Dialogar'],
-    habilidades: ['Asistencia Técnica'],
-    descripcion: 'La información adicional de este personaje se incorporará cuando esté definida.',
-  },
-  {
-    id: 'tecnocrata',
-    initials: 'T',
-    nombre: 'Tecnócrata',
-    rol: 'NPC',
-    salud: '—',
-    actitud: 'Sin IA',
-    apariciones: ['Nivel 2'],
-    acciones: ['Supervisar', 'Dialogar'],
-    habilidades: ['Control de Sistemas'],
-    descripcion: 'La información adicional de este personaje se incorporará cuando esté definida.',
-  },
-  {
-    id: 'sentinela-alpha-34',
-    initials: 'SA3',
-    nombre: 'Sentinela Alpha-34',
-    rol: 'Enemigo',
-    salud: '75',
-    actitud: 'Fácil',
-    apariciones: ['Todos'],
-    acciones: ['Caminar', 'Correr', 'Atacar'],
-    habilidades: ['Ataque Corto', 'Patrullaje'],
-    descripcion: 'Unidad de vigilancia automatizada registrada en el archivo de Metronia.',
-  },
-  {
-    id: 'cyborg-omega-06',
-    initials: 'CO0',
-    nombre: 'Cyborg Omega-06',
-    rol: 'Enemigo',
-    salud: '100',
-    actitud: 'Intermedio',
-    apariciones: ['Nivel 2', 'Nivel 3'],
-    acciones: ['Caminar', 'Correr', 'Saltar', 'Atacar'],
-    habilidades: ['Ataque Corto', 'Ataque Intermedio (Golpe)'],
-    descripcion: 'Unidad cibernética de combate con respuesta táctica intermedia.',
-  },
-  {
-    id: 'dron-epsilon-21',
-    initials: 'DE2',
-    nombre: 'Dron Epsilon-21',
-    rol: 'Enemigo',
-    salud: '45',
-    actitud: 'Fácil',
-    apariciones: ['Nivel 2', 'Nivel 3'],
-    acciones: ['Volar', 'Atacar'],
-    habilidades: ['Ataque a Distancia (Proyectil o Laser)'],
-    descripcion: 'Dron ligero de reconocimiento y hostigamiento aéreo.',
-  },
-  {
-    id: 'victoria-ashford',
-    initials: 'VA',
-    nombre: 'Victoria Ashford',
-    rol: 'Sub-Jefe',
-    salud: '—',
-    actitud: 'Sin IA',
-    apariciones: ['Nivel 2', 'Nivel 3'],
-    acciones: ['Caminar', 'Atacar'],
-    habilidades: ['Ataque Intermedio (Golpe)', 'Ataque a Distancia (Proyectil o Laser)'],
-    descripcion: 'La información adicional de este personaje se incorporará cuando esté definida.',
-  },
-];
+type LocalCharacterFrame = {
+  folder: string;
+  source: ImageSourcePropType;
+};
+
+const characterFrameContext = (require as any).context(
+  "./personajes",
+  true,
+  /^\.\/[^/]+\/frame_00\.png$/i
+);
+
+const LOCAL_CHARACTER_FRAMES: LocalCharacterFrame[] =
+  characterFrameContext.keys().map((file: string) => {
+    const segments = file.split("/");
+    return {
+      folder: segments[1] ?? "",
+      source: characterFrameContext(file) as ImageSourcePropType,
+    };
+  });
+
+function normalizeCharacterKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/*
+ * La clave de cada entrada representa términos que pueden aparecer
+ * en el slug o nombre devuelto por la API. El valor es la carpeta
+ * real del proyecto que contiene el frame_00.png que se debe mostrar.
+ *
+ * Se seleccionan explícitamente Jack_Veil_Running y Lucius_Invocar.
+ * Las variantes repetidas de sus carpetas quedan fuera del catálogo.
+ */
+const CHARACTER_FRAME_FOLDERS: Record<string, string> = {
+  jackveil: "Jack_Veil_Running",
+  jack: "Jack_Veil_Running",
+  doctor: "Doctor",
+  tecnocrata: "Tecnocrata",
+  beta32: "Beta32",
+  sentinelabeta32: "Beta32",
+  epsilon21: "Epsilon21",
+  dronepsilon21: "Epsilon21",
+  gamma128: "Gamma128_Martillo",
+  gamma128martillo: "Gamma128_Martillo",
+  kar: "KAR_Walk",
+  lucius: "Lucius_Invocar",
+  sirbielas: "SirBielas_Estocada",
+  omega06: "Omega06_Attack",
+  sentinelaalpha16: "SentinelaAlpha16_attack",
+};
+
+function getCharacterFrame(
+  slug: string,
+  name: string
+): ImageSourcePropType | null {
+  const apiKeys = [slug, name].map(normalizeCharacterKey).filter(Boolean);
+
+  for (const apiKey of apiKeys) {
+    const matchingAlias = Object.keys(CHARACTER_FRAME_FOLDERS).find(
+      (alias) => apiKey.includes(alias) || alias.includes(apiKey)
+    );
+
+    if (!matchingAlias) continue;
+
+    const folderName = CHARACTER_FRAME_FOLDERS[matchingAlias];
+    const frame = LOCAL_CHARACTER_FRAMES.find(
+      (item) => item.folder === folderName
+    );
+
+    if (frame) return frame.source;
+  }
+
+  return null;
+}
+
+const COLORS = {
+  background: "#17191C",
+  backgroundDeep: "#101215",
+  panel: "#22252B",
+  panelLight: "#2B3039",
+  paper: "#E9D5AD",
+  paperDark: "#C2A779",
+  muted: "#B6B0A4",
+  red: "#E34C3B",
+  orange: "#C28B43",
+  copper: "#8F4C32",
+  teal: "#24D7D1",
+  ink: "#090A0C",
+  text: "#F5EEE0",
+  border: "#514337",
+};
 
 export default function CharactersScreen() {
-  const [loadingWeb, setLoadingWeb] = useState(true);
+  const [characters, setCharacters] = useState<CharacterRecord[]>([]);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterRecord | null>(null);
-
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isCompact = width < 380;
+  const isTablet = width >= 700;
 
-  const WebView =
-    Platform.OS !== 'web' ? require('react-native-webview').WebView : null;
+  const loadCharacters = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await apiGet<PersonajeApi[]>("/personajes");
+      const publishedCharacters = (data ?? [])
+        .filter((item) => item.publicado === true)
+        .map((item) => ({
+          id: item.pkPersonaje,
+          initials: item.nombre.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase(),
+          nombre: item.nombre,
+          rol: item.rol,
+          salud: item.puntosSalud,
+          actitud: item.agresividad,
+          descripcion: item.descripcion ?? "",
+          historia: item.historia ?? "",
+          frameSource: getCharacterFrame(item.slug, item.nombre),
+        }));
+      setCharacters(publishedCharacters);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron cargar los personajes.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCharacters();
+  }, [loadCharacters]);
 
   const handleNavigation = (route: string) => {
     switch (route) {
-      case '/':
-        router.push('/');
+      case "/":
+        router.push("/");
         break;
-      case '/history':
-        router.push('/history' as any);
+      case "/history":
+        router.push("/history" as any);
         break;
-      case '/characters':
-        router.push('/characters' as any);
+      case "/characters":
+        router.push("/characters" as any);
         break;
-      case 'Logout':
-      case '/logout':
-        if (Platform.OS === 'android') {
-          BackHandler.exitApp();
-        } else {
-          router.replace('/');
-        }
+      case "Logout":
+      case "/logout":
+        if (Platform.OS === "android") BackHandler.exitApp();
+        else router.replace("/");
         break;
       default:
         break;
@@ -158,199 +200,218 @@ export default function CharactersScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerContainer} pointerEvents="box-none">
-        <CustomHeader />
+      <View pointerEvents="none" style={styles.backgroundTexture}>
+        <View style={styles.backgroundGlowTop} />
+        <View style={styles.backgroundGlowBottom} />
+        {Array.from({ length: 13 }).map((_, index) => (
+          <View key={`grid-v-${index}`} style={[styles.gridVertical, { left: `${(index + 1) * (100 / 14)}%` }]} />
+        ))}
+        {Array.from({ length: 17 }).map((_, index) => (
+          <View key={`grid-h-${index}`} style={[styles.gridHorizontal, { top: `${(index + 1) * (100 / 18)}%` }]} />
+        ))}
       </View>
 
-      <View style={styles.contentContainer}>
-        {Platform.OS === 'web' ? (
-          <iframe
-            src={CHARACTERS_URL}
-            style={{
-              border: 'none',
-              width: '100%',
-              height: '100%',
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              zIndex: 1,
-            }}
-            title="Personajes"
-          />
-        ) : (
-          <WebView
-            source={{ uri: CHARACTERS_URL }}
-            style={[styles.webview, StyleSheet.absoluteFill]}
-            onLoadEnd={() => setLoadingWeb(false)}
-            onError={() => setLoadingWeb(false)}
-            javaScriptEnabled
-            domStorageEnabled
-            originWhitelist={['*']}
-          />
-        )}
-
-        {/* BLOQUE CONTENEDOR DELIMITADO: NUNCA SUBE ENCIMA DEL HEADER NI BAJA DEL FOOTER */}
-        <View style={styles.charactersBlock} pointerEvents="box-none">
-          <ScrollView
-            style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={true}
-            nestedScrollEnabled
-          >
-            {CHARACTERS_DATA.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.characterCard}
-                onPress={() => setSelectedCharacter(item)}
-                activeOpacity={0.85}
-              >
-                <View style={styles.initialsBadge}>
-                  <Text style={styles.initialsText}>{item.initials}</Text>
-                </View>
-
-                <View style={styles.cardInfo}>
-                  <View style={styles.topRow}>
-                    <Text style={styles.characterName}>{item.nombre}</Text>
-                    <View style={styles.roleTag}>
-                      <Text style={styles.roleTagText}>{item.rol}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.statsInline}>
-                    <View style={styles.statPill}>
-                      <Ionicons name="heart" size={13} color="#9E2A2B" />
-                      <Text style={styles.statPillText}>SALUD: {item.salud}</Text>
-                    </View>
-
-                    <View style={styles.statPill}>
-                      <Ionicons name="shield" size={13} color="#6F421E" />
-                      <Text style={styles.statPillText}>ACTITUD: {item.actitud}</Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.appearanceLine}>
-                    Aparición: {item.apariciones.join(', ')}
-                  </Text>
-                  <Text style={styles.tapHint}>Tocar para ver ficha completa →</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        {loadingWeb && Platform.OS !== 'web' && (
-          <View style={styles.loader}>
-            <ActivityIndicator size="large" color="#c18f34" />
-          </View>
-        )}
-      </View>
-
-      {/* MODAL DE DETALLES CON ESTÉTICA PERGAMINO / CUERO / DORADO */}
-      <Modal
-        visible={!!selectedCharacter}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectedCharacter(null)}
+      <ScrollView
+        style={styles.pageScroll}
+        contentContainerStyle={[styles.pageContent, { paddingHorizontal: isCompact ? 15 : isTablet ? 34 : 21, paddingBottom: 112 }]}
+        showsVerticalScrollIndicator={false}
       >
+        <View style={[styles.pageContainer, { maxWidth: isTablet ? 920 : 620 }]}>
+          <View style={styles.fileLabel}>
+            <View style={styles.pixelDot} />
+            <Text style={styles.fileLabelText}>ARCHIVO DE METRONIA</Text>
+            <Text style={styles.fileLabelDivider}>//</Text>
+            <Text style={styles.fileLabelText}>PERSONAL</Text>
+          </View>
+
+          <View style={styles.pageHeading}>
+            <View style={styles.headingCopy}>
+              <Text style={styles.eyebrow}>REGISTRO DE PERSONAJES</Text>
+              <Text style={[styles.pageTitle, { fontSize: isCompact ? 43 : isTablet ? 62 : 54 }]}>PERSONAJES</Text>
+              <Text style={styles.pageDescription}>Conoce a quienes habitan Metronia, sus historias y los atributos que definen su papel en la aventura.</Text>
+            </View>
+            <View style={styles.totalPanel}>
+              <View style={styles.totalPanelMain}>
+                <Ionicons name="people-outline" size={24} color={COLORS.orange} />
+                <Text style={styles.totalLabel}>REGISTROS</Text>
+                <Text style={styles.totalNumber}>{loading ? "--" : String(characters.length).padStart(2, "0")}</Text>
+              </View>
+              <View style={styles.totalPanelFooter}>
+                <Text style={styles.totalFooterText}>METRONIA</Text>
+                <Text style={styles.totalFooterText}>2943</Text>
+              </View>
+              <View style={styles.pixelDecoration}>
+                {Array.from({ length: 9 }).map((_, index) => <View key={index} style={[styles.pixelDecorationCell, index % 2 === 0 && styles.pixelDecorationCellDim]} />)}
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.directoryHeading}>
+            <View style={styles.directoryHeadingCopy}>
+              <View style={styles.sectionKickerRow}>
+                <View style={styles.pixelDot} />
+                <Text style={styles.sectionKicker}>DIRECTORIO CENTRAL</Text>
+              </View>
+              <Text style={styles.sectionTitle}>HABITANTES DE METRONIA</Text>
+            </View>
+            <Text style={styles.directoryCount}>{String(characters.length).padStart(2, "0")} ARCHIVOS</Text>
+          </View>
+
+          {loading ? (
+            <View style={styles.statePanel}>
+              <ActivityIndicator size="large" color={COLORS.orange} />
+              <Text style={styles.stateTitle}>CONSULTANDO ARCHIVO...</Text>
+              <Text style={styles.stateDescription}>Conectando con los registros de Metronia.</Text>
+            </View>
+          ) : error ? (
+            <View style={[styles.statePanel, styles.errorPanel]}>
+              <Ionicons name="warning-outline" size={30} color={COLORS.red} />
+              <Text style={styles.stateTitle}>NO SE PUDO CARGAR EL ARCHIVO</Text>
+              <Text style={styles.stateDescription}>{error}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={loadCharacters} activeOpacity={0.85}>
+                <Ionicons name="refresh" size={16} color={COLORS.ink} />
+                <Text style={styles.retryButtonText}>REINTENTAR</Text>
+              </TouchableOpacity>
+            </View>
+          ) : characters.length === 0 ? (
+            <View style={styles.statePanel}>
+              <Ionicons name="people-outline" size={30} color={COLORS.orange} />
+              <Text style={styles.stateTitle}>SIN REGISTROS DISPONIBLES</Text>
+              <Text style={styles.stateDescription}>Todavía no hay personajes publicados en el archivo central.</Text>
+            </View>
+          ) : (
+            <View style={[styles.characterList, isTablet && styles.characterGrid]}>
+              {characters.map((item, index) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.characterCard, isTablet && styles.characterCardTablet]}
+                  onPress={() => setSelectedCharacter(item)}
+                  activeOpacity={0.88}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Abrir ficha de ${item.nombre}`}
+                >
+                  <View style={styles.characterCardMain}>
+                    <View style={styles.characterPortrait}>
+                      {item.frameSource ? (
+                        <Image
+                          source={item.frameSource}
+                          style={styles.characterFrameImage}
+                          resizeMode="contain"
+                          fadeDuration={0}
+                          accessibilityLabel={`Retrato de ${item.nombre}`}
+                        />
+                      ) : (
+                        <View style={styles.portraitFallback}>
+                          <Ionicons name="person-outline" size={42} color={COLORS.paperDark} />
+                          <Text style={styles.portraitFallbackInitials}>{item.initials || "??"}</Text>
+                        </View>
+                      )}
+                      <View style={styles.portraitFrameCorner} />
+                      <Text style={styles.portraitRecord}>VL // {String(index + 1).padStart(2, "0")}</Text>
+                    </View>
+                    <View style={styles.characterSummary}>
+                      <View style={styles.roleBadge}>
+                        <Text style={styles.roleBadgeText} numberOfLines={1}>{item.rol || "SIN CLASIFICAR"}</Text>
+                      </View>
+                      <Text style={styles.characterIndex}>REGISTRO {String(index + 1).padStart(3, "0")}</Text>
+                      <Text style={styles.characterName} numberOfLines={2}>{item.nombre}</Text>
+                      <View style={styles.summaryDivider} />
+                      <View style={styles.summaryStat}>
+                        <Ionicons name="heart" size={14} color={COLORS.red} />
+                        <Text style={styles.summaryStatLabel}>SALUD</Text>
+                        <Text style={styles.summaryStatValue}>{item.salud}</Text>
+                      </View>
+                      <View style={styles.summaryStat}>
+                        <Ionicons name="shield-half-outline" size={14} color={COLORS.orange} />
+                        <Text style={styles.summaryStatLabel}>AGRESIVIDAD</Text>
+                        <Text style={styles.summaryStatValue} numberOfLines={1}>{item.actitud || "SIN DATOS"}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.characterInfo}>
+                    <Text style={styles.cardActionText}>CONSULTAR EXPEDIENTE</Text>
+                    <Ionicons name="arrow-forward" size={17} color={COLORS.teal} />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <View style={styles.pageFooter}>
+            <View style={styles.pageFooterCopy}>
+              <Text style={styles.pageFooterCode}>VAPORLOCK // 2943</Text>
+              <Text style={styles.pageFooterTitle}>EL ARCHIVO DE METRONIA</Text>
+              <Text style={styles.pageFooterDescription}>Cada habitante forma parte de una ciudad al borde de la revolución.</Text>
+            </View>
+            <View style={styles.footerPixelMark}>
+              {Array.from({ length: 9 }).map((_, index) => <View key={index} style={[styles.footerPixel, index % 3 === 1 && styles.footerPixelMuted]} />)}
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+
+      <Modal visible={selectedCharacter !== null} transparent animationType="fade" onRequestClose={() => setSelectedCharacter(null)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalTopBanner}>
+              <View style={styles.modalBannerLine} />
+              <Text style={styles.modalEyebrow}>ARCHIVO DE METRONIA // EXPEDIENTE</Text>
               <Text style={styles.modalTitle}>{selectedCharacter?.nombre}</Text>
               <Text style={styles.modalSubtitle}>{selectedCharacter?.rol}</Text>
+              <TouchableOpacity style={styles.modalCloseIcon} onPress={() => setSelectedCharacter(null)} accessibilityLabel="Cerrar ficha">
+                <Ionicons name="close" size={21} color={COLORS.paper} />
+              </TouchableOpacity>
             </View>
-
-            <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={true}>
-              <Text style={styles.modalDescription}>{selectedCharacter?.descripcion}</Text>
-
-              {/* ATRIBUTOS */}
+            {selectedCharacter?.frameSource && (
+              <View style={styles.modalPortraitPanel}>
+                <Image
+                  source={selectedCharacter.frameSource}
+                  style={styles.modalPortraitImage}
+                  resizeMode="contain"
+                  fadeDuration={0}
+                />
+              </View>
+            )}
+            <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
               <View style={styles.sectionBlock}>
                 <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="pulse-outline" size={16} color="#8C5228" />
+                  <Ionicons name="person-outline" size={17} color={COLORS.orange} />
+                  <Text style={styles.sectionHeaderText}>DESCRIPCIÓN</Text>
+                  <View style={styles.sectionDivider} />
+                </View>
+                <Text style={styles.modalDescription}>{selectedCharacter?.descripcion?.trim() || "No hay una descripción registrada para este personaje."}</Text>
+              </View>
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="book-outline" size={17} color={COLORS.orange} />
+                  <Text style={styles.sectionHeaderText}>HISTORIA</Text>
+                  <View style={styles.sectionDivider} />
+                </View>
+                <Text style={styles.modalDescription}>{selectedCharacter?.historia?.trim() || "No hay una historia registrada para este personaje."}</Text>
+              </View>
+              <View style={styles.sectionBlock}>
+                <View style={styles.sectionHeaderRow}>
+                  <Ionicons name="pulse-outline" size={17} color={COLORS.orange} />
                   <Text style={styles.sectionHeaderText}>ATRIBUTOS</Text>
                   <View style={styles.sectionDivider} />
                 </View>
-
                 <View style={styles.attributeRowCard}>
-                  <View style={styles.attributeLeft}>
-                    <Ionicons name="heart-outline" size={18} color="#9E2A2B" />
-                    <Text style={styles.attributeLabel}>SALUD</Text>
-                  </View>
+                  <View style={styles.attributeLeft}><Ionicons name="heart-outline" size={18} color={COLORS.red} /><Text style={styles.attributeLabel}>SALUD</Text></View>
                   <Text style={styles.attributeValue}>{selectedCharacter?.salud}</Text>
                 </View>
-
                 <View style={styles.attributeRowCard}>
-                  <View style={styles.attributeLeft}>
-                    <Ionicons name="shield-outline" size={18} color="#6F421E" />
-                    <Text style={styles.attributeLabel}>ACTITUD</Text>
-                  </View>
+                  <View style={styles.attributeLeft}><Ionicons name="shield-outline" size={18} color={COLORS.orange} /><Text style={styles.attributeLabel}>AGRESIVIDAD</Text></View>
                   <Text style={styles.attributeValue}>{selectedCharacter?.actitud}</Text>
                 </View>
-
                 <View style={styles.attributeRowCard}>
-                  <View style={styles.attributeLeft}>
-                    <Ionicons name="locate-outline" size={18} color="#8C5228" />
-                    <Text style={styles.attributeLabel}>ROL</Text>
-                  </View>
+                  <View style={styles.attributeLeft}><Ionicons name="locate-outline" size={18} color={COLORS.teal} /><Text style={styles.attributeLabel}>ROL</Text></View>
                   <Text style={styles.attributeValue}>{selectedCharacter?.rol}</Text>
                 </View>
               </View>
-
-              {/* APARICIONES */}
-              <View style={styles.sectionBlock}>
-                <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="book-outline" size={16} color="#8C5228" />
-                  <Text style={styles.sectionHeaderText}>APARICIONES</Text>
-                  <View style={styles.sectionDivider} />
-                </View>
-                <View style={styles.chipsWrap}>
-                  {(selectedCharacter?.apariciones ?? []).map((app, idx) => (
-                    <View key={`app-${idx}`} style={styles.parchmentChip}>
-                      <Text style={styles.chipText}>{app}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {/* ACCIONES */}
-              <View style={styles.sectionBlock}>
-                <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="walk-outline" size={16} color="#8C5228" />
-                  <Text style={styles.sectionHeaderText}>ACCIONES</Text>
-                  <View style={styles.sectionDivider} />
-                </View>
-                <View style={styles.chipsWrap}>
-                  {(selectedCharacter?.acciones ?? []).map((action, idx) => (
-                    <View key={`act-${idx}`} style={styles.leatherChip}>
-                      <Text style={styles.leatherChipText}>{action}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {/* HABILIDADES */}
-              <View style={styles.sectionBlock}>
-                <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="flash-outline" size={16} color="#8C5228" />
-                  <Text style={styles.sectionHeaderText}>HABILIDADES</Text>
-                  <View style={styles.sectionDivider} />
-                </View>
-                <View style={styles.chipsWrap}>
-                  {(selectedCharacter?.habilidades ?? []).map((skill, idx) => (
-                    <View key={`skl-${idx}`} style={styles.brassChip}>
-                      <Ionicons name="flash-outline" size={14} color="#e3bd26" />
-                      <Text style={styles.leatherChipText}>{skill}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
             </ScrollView>
-
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setSelectedCharacter(null)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.closeButtonText}>CERRAR FICHA</Text>
+            <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedCharacter(null)} activeOpacity={0.85}>
+              <Text style={styles.closeButtonText}>CERRAR EXPEDIENTE</Text>
+              <Ionicons name="arrow-forward" size={17} color={COLORS.ink} />
             </TouchableOpacity>
           </View>
         </View>
@@ -364,307 +425,96 @@ export default function CharactersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#000',
-  },
-  headerContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    elevation: 30,
-  },
-  contentContainer: {
-    flex: 1,
-    position: 'relative',
-    zIndex: 1,
-    overflow: 'hidden',
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: 'black',
-  },
-  charactersBlock: {
-    position: 'absolute',
-    top: 120,
-    left: 14,
-    right: 14,
-    bottom: 86,
-    zIndex: 10,
-    elevation: 10,
-    backgroundColor: 'rgba(42, 24, 16, 0.35)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(212, 175, 55, 0.55)',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 12,
-    gap: 14,
-  },
-  characterCard: {
-    flexDirection: 'row',
-    backgroundColor: '#8d7238',
-    borderWidth: 2,
-    borderColor: '#D4AF37',
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  initialsBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
-    backgroundColor: '#2A1810',
-    borderWidth: 1.5,
-    borderColor: '#D4AF37',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  initialsText: {
-    color: '#F3E5AB',
-    fontSize: 16,
-    fontWeight: 'bold',
-    letterSpacing: 0.8,
-  },
-  cardInfo: {
-    flex: 1,
-  },
-  topRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 6,
-  },
-  characterName: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#2A1810',
-  },
-  roleTag: {
-    backgroundColor: '#8C5228',
-    borderWidth: 1,
-    borderColor: '#D4AF37',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  roleTagText: {
-    color: '#FFF8DC',
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  statsInline: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 6,
-  },
-  statPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#F8F0DD',
-    borderWidth: 1,
-    borderColor: '#C59B38',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  statPillText: {
-    color: '#2C1810',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  appearanceLine: {
-    fontSize: 13,
-    color: '#4A2B1D',
-    fontWeight: '600',
-  },
-  tapHint: {
-    fontSize: 12,
-    color: '#8C5228',
-    marginTop: 5,
-    fontWeight: 'bold',
-  },
-  loader: {
-    ...StyleSheet.absoluteFill,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'black',
-    zIndex: 15,
-  },
-  footerContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 20,
-    elevation: 20,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 430,
-    maxHeight: '86%',
-    backgroundColor: '#EFE2C6',
-    borderWidth: 2,
-    borderColor: '#D4AF37',
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  modalTopBanner: {
-    backgroundColor: '#2A1810',
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderBottomWidth: 2,
-    borderBottomColor: '#D4AF37',
-    alignItems: 'center',
-  },
-  modalScroll: {
-    padding: 18,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#F3E5AB',
-    textAlign: 'center',
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: '#D4AF37',
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 3,
-    letterSpacing: 1,
-  },
-  modalDescription: {
-    fontSize: 15,
-    color: '#2C1810',
-    lineHeight: 22,
-    textAlign: 'justify',
-    marginBottom: 18,
-  },
-  sectionBlock: {
-    marginBottom: 16,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-    gap: 8,
-  },
-  sectionHeaderText: {
-    color: '#5C3317',
-    fontSize: 13,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  sectionDivider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(140, 82, 40, 0.35)',
-  },
-  attributeRowCard: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#9c751a',
-    borderWidth: 1.2,
-    borderColor: '#C59B38',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
-  },
-  attributeLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  attributeLabel: {
-    color: '#3B2219',
-    fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
-  attributeValue: {
-    color: '#2A1810',
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
-  chipsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  parchmentChip: {
-    backgroundColor: '#cf9818',
-    borderWidth: 1.2,
-    borderColor: '#B88B2D',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  leatherChip: {
-    backgroundColor: '#4A2B1D',
-    borderWidth: 1.2,
-    borderColor: '#D4AF37',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  brassChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#8C5228',
-    borderWidth: 1.2,
-    borderColor: '#D4AF37',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  chipText: {
-    color: '#2C1810',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  leatherChipText: {
-    color: '#FFF8DC',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  closeButton: {
-    backgroundColor: '#8C5228',
-    borderTopWidth: 2,
-    borderTopColor: '#D4AF37',
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  closeButtonText: {
-    color: '#FFF8DC',
-    fontSize: 15,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background, overflow: "hidden" },
+  backgroundTexture: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, overflow: "hidden", opacity: 0.65 },
+  backgroundGlowTop: { position: "absolute", top: 20, left: -110, width: 260, height: 260, borderRadius: 130, backgroundColor: "rgba(143,76,50,0.12)" },
+  backgroundGlowBottom: { position: "absolute", right: -130, bottom: 80, width: 300, height: 300, borderRadius: 150, backgroundColor: "rgba(194,139,67,0.08)" },
+  gridVertical: { position: "absolute", top: 0, bottom: 0, width: 1, backgroundColor: "rgba(233,213,173,0.035)" },
+  gridHorizontal: { position: "absolute", left: 0, right: 0, height: 1, backgroundColor: "rgba(233,213,173,0.035)" },
+  pageScroll: { flex: 1 },
+  pageContent: { flexGrow: 1, alignItems: "center", paddingTop: 25 },
+  pageContainer: { width: "100%", alignSelf: "center" },
+  fileLabel: { alignSelf: "flex-start", minHeight: 31, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderWidth: 2, borderColor: COLORS.border, backgroundColor: COLORS.panel, shadowColor: COLORS.ink, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3 },
+  pixelDot: { width: 7, height: 7, backgroundColor: COLORS.orange, marginRight: 8 },
+  fileLabelText: { color: COLORS.muted, fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  fileLabelDivider: { color: COLORS.orange, marginHorizontal: 8, fontSize: 10, fontWeight: "900" },
+  pageHeading: { marginTop: 19, paddingLeft: 12, paddingBottom: 15, borderLeftWidth: 4, borderLeftColor: COLORS.copper, borderBottomWidth: 2, borderBottomColor: COLORS.border },
+  headingCopy: { minWidth: 0 },
+  eyebrow: { color: COLORS.orange, fontSize: 10, fontWeight: "900", letterSpacing: 1.8, marginBottom: 7 },
+  pageTitle: { color: COLORS.paper, fontWeight: "900", letterSpacing: 1.2, lineHeight: 58, textShadowColor: COLORS.copper, textShadowOffset: { width: 3, height: 3 }, textShadowRadius: 0 },
+  pageDescription: { maxWidth: 590, marginTop: 7, color: COLORS.muted, fontSize: 12, lineHeight: 18 },
+  totalPanel: { position: "relative", minHeight: 104, marginTop: 17, overflow: "hidden", borderWidth: 2, borderColor: COLORS.border, backgroundColor: COLORS.panel, shadowColor: COLORS.ink, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  totalPanelMain: { minHeight: 72, paddingHorizontal: 13, paddingVertical: 9, flexDirection: "row", alignItems: "center" },
+  totalLabel: { marginLeft: 10, color: COLORS.muted, fontSize: 9, fontWeight: "900", letterSpacing: 1, flex: 1 },
+  totalNumber: { color: COLORS.paper, fontSize: 38, fontWeight: "900", lineHeight: 43, textShadowColor: COLORS.copper, textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0 },
+  totalPanelFooter: { minHeight: 27, paddingHorizontal: 11, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 2, borderTopColor: COLORS.border, backgroundColor: COLORS.backgroundDeep },
+  totalFooterText: { color: COLORS.muted, fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  pixelDecoration: { position: "absolute", top: 8, right: 9, flexDirection: "row", flexWrap: "wrap", width: 29 },
+  pixelDecorationCell: { width: 5, height: 5, margin: 1, backgroundColor: COLORS.orange },
+  pixelDecorationCellDim: { opacity: 0.2 },
+  directoryHeading: { marginTop: 21, marginBottom: 13, paddingBottom: 10, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", borderBottomWidth: 2, borderBottomColor: COLORS.border },
+  directoryHeadingCopy: { flex: 1, minWidth: 0 },
+  sectionKickerRow: { flexDirection: "row", alignItems: "center", marginBottom: 5 },
+  sectionKicker: { color: COLORS.orange, fontSize: 8, fontWeight: "900", letterSpacing: 1 },
+  sectionTitle: { color: COLORS.paper, fontSize: 22, fontWeight: "900", lineHeight: 28, textShadowColor: COLORS.copper, textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0 },
+  directoryCount: { color: COLORS.orange, fontSize: 8, fontWeight: "900", letterSpacing: 0.7, marginLeft: 8, marginBottom: 3 },
+  characterList: { width: "100%" },
+  characterGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between" },
+  characterCard: { width: "100%", marginBottom: 12, overflow: "hidden", borderWidth: 2, borderColor: COLORS.ink, backgroundColor: COLORS.panel, shadowColor: COLORS.ink, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  characterCardTablet: { width: "48.5%" },
+  characterCardMain: { minHeight: 148, flexDirection: "row", backgroundColor: COLORS.panel },
+  characterPortrait: { position: "relative", width: 116, minHeight: 148, justifyContent: "center", alignItems: "center", overflow: "hidden", borderRightWidth: 2, borderRightColor: COLORS.ink, backgroundColor: "#252D38" },
+  characterFrameImage: { width: "100%", height: 130 },
+  portraitFallback: { flex: 1, width: "100%", justifyContent: "center", alignItems: "center" },
+  portraitFallbackInitials: { marginTop: 5, color: COLORS.orange, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
+  portraitFrameCorner: { position: "absolute", top: 7, left: 7, width: 15, height: 15, borderTopWidth: 2, borderLeftWidth: 2, borderColor: COLORS.orange },
+  portraitRecord: { position: "absolute", right: 4, bottom: 5, left: 4, color: COLORS.teal, fontSize: 7, fontWeight: "900", textAlign: "center", letterSpacing: 0.4 },
+  characterSummary: { flex: 1, minWidth: 0, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10 },
+  roleBadge: { alignSelf: "flex-start", maxWidth: "100%", marginBottom: 7, paddingHorizontal: 7, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.ink, backgroundColor: COLORS.red },
+  roleBadgeText: { color: COLORS.text, fontSize: 8, fontWeight: "900", letterSpacing: 0.5 },
+  characterIndex: { color: COLORS.orange, fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  characterName: { marginTop: 3, color: COLORS.paper, fontSize: 18, fontWeight: "900", lineHeight: 22 },
+  summaryDivider: { height: 1, marginTop: 8, marginBottom: 6, backgroundColor: COLORS.border },
+  summaryStat: { minHeight: 21, flexDirection: "row", alignItems: "center" },
+  summaryStatLabel: { flex: 1, marginLeft: 6, color: COLORS.muted, fontSize: 8, fontWeight: "900", letterSpacing: 0.5 },
+  summaryStatValue: { maxWidth: "48%", color: COLORS.text, fontSize: 10, fontWeight: "800", textAlign: "right" },
+  characterInfo: { minHeight: 36, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 1, borderTopColor: COLORS.border, backgroundColor: COLORS.backgroundDeep },
+  cardActionText: { color: COLORS.teal, fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  statePanel: { minHeight: 185, padding: 22, justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: COLORS.border, backgroundColor: COLORS.panel, shadowColor: COLORS.ink, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  errorPanel: { borderLeftWidth: 5, borderLeftColor: COLORS.red },
+  stateTitle: { marginTop: 12, color: COLORS.paper, fontSize: 12, fontWeight: "900", letterSpacing: 0.8, textAlign: "center" },
+  stateDescription: { maxWidth: 390, marginTop: 7, color: COLORS.muted, fontSize: 12, lineHeight: 18, textAlign: "center" },
+  retryButton: { minHeight: 39, marginTop: 15, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: COLORS.ink, backgroundColor: COLORS.orange, shadowColor: COLORS.ink, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 1, shadowRadius: 0, elevation: 3 },
+  retryButtonText: { marginLeft: 7, color: COLORS.ink, fontSize: 10, fontWeight: "900", letterSpacing: 0.8 },
+  pageFooter: { minHeight: 105, marginTop: 22, paddingHorizontal: 14, paddingVertical: 13, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 2, borderColor: COLORS.border, backgroundColor: COLORS.panel, shadowColor: COLORS.ink, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 1, shadowRadius: 0, elevation: 4 },
+  pageFooterCopy: { flex: 1, paddingRight: 10 },
+  pageFooterCode: { color: COLORS.orange, fontSize: 8, fontWeight: "900", letterSpacing: 0.8 },
+  pageFooterTitle: { marginTop: 5, color: COLORS.paper, fontSize: 18, fontWeight: "900", letterSpacing: 0.4 },
+  pageFooterDescription: { marginTop: 4, color: COLORS.muted, fontSize: 10, lineHeight: 15 },
+  footerPixelMark: { width: 40, flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end" },
+  footerPixel: { width: 8, height: 8, margin: 2, backgroundColor: COLORS.orange },
+  footerPixelMuted: { backgroundColor: COLORS.paperDark, opacity: 0.35 },
+  footerContainer: { position: "absolute", right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
+  modalBackdrop: { flex: 1, padding: 16, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(5,7,10,0.88)" },
+  modalCard: { width: "100%", maxWidth: 480, maxHeight: "88%", overflow: "hidden", borderWidth: 3, borderColor: COLORS.ink, backgroundColor: COLORS.panel, shadowColor: COLORS.ink, shadowOffset: { width: 7, height: 7 }, shadowOpacity: 1, shadowRadius: 0, elevation: 10 },
+  modalTopBanner: { position: "relative", paddingHorizontal: 18, paddingTop: 18, paddingBottom: 15, alignItems: "center", borderBottomWidth: 3, borderBottomColor: COLORS.ink, backgroundColor: COLORS.backgroundDeep },
+  modalBannerLine: { width: 55, height: 4, marginBottom: 10, backgroundColor: COLORS.orange },
+  modalEyebrow: { color: COLORS.orange, fontSize: 8, fontWeight: "900", letterSpacing: 1.1 },
+  modalTitle: { marginTop: 8, color: COLORS.paper, fontSize: 25, fontWeight: "900", textAlign: "center", textShadowColor: COLORS.copper, textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 0 },
+  modalSubtitle: { marginTop: 4, color: COLORS.teal, fontSize: 10, fontWeight: "900", letterSpacing: 1 },
+  modalCloseIcon: { position: "absolute", top: 9, right: 9, width: 34, height: 34, justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.panel },
+  modalPortraitPanel: { height: 150, justifyContent: "center", alignItems: "center", borderBottomWidth: 2, borderBottomColor: COLORS.ink, backgroundColor: "#252D38" },
+  modalPortraitImage: { width: 130, height: 140 },
+  modalScroll: { paddingHorizontal: 17, paddingTop: 17, paddingBottom: 8 },
+  sectionBlock: { marginBottom: 17 },
+  sectionHeaderRow: { flexDirection: "row", alignItems: "center", marginBottom: 9 },
+  sectionHeaderText: { marginLeft: 7, color: COLORS.orange, fontSize: 10, fontWeight: "900", letterSpacing: 1 },
+  sectionDivider: { flex: 1, height: 1, marginLeft: 10, backgroundColor: COLORS.border },
+  modalDescription: { color: COLORS.text, fontSize: 13, lineHeight: 20 },
+  attributeRowCard: { minHeight: 48, marginBottom: 8, paddingHorizontal: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 1, borderColor: COLORS.border, backgroundColor: COLORS.panelLight },
+  attributeLeft: { flexDirection: "row", alignItems: "center" },
+  attributeLabel: { marginLeft: 9, color: COLORS.muted, fontSize: 9, fontWeight: "900", letterSpacing: 0.8 },
+  attributeValue: { maxWidth: "55%", color: COLORS.paper, fontSize: 12, fontWeight: "900", textAlign: "right" },
+  closeButton: { minHeight: 49, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", borderTopWidth: 3, borderTopColor: COLORS.ink, backgroundColor: COLORS.orange },
+  closeButtonText: { marginRight: 9, color: COLORS.ink, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
 });

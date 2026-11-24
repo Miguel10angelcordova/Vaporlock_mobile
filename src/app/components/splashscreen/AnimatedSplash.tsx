@@ -1,5 +1,6 @@
-import React from "react";
-import { View, StyleSheet } from "react-native";
+
+import { useCallback } from "react";
+import { StyleSheet, View } from "react-native";
 import LottieView from "lottie-react-native";
 
 type Props = {
@@ -7,6 +8,15 @@ type Props = {
 };
 
 export default function AnimatedSplash({ onFinish }: Props) {
+  const handleAnimationFinish = useCallback(
+    (isCancelled: boolean) => {
+      if (!isCancelled) {
+        onFinish();
+      }
+    },
+    [onFinish]
+  );
+
   return (
     <View style={styles.container}>
       <LottieView
@@ -14,7 +24,7 @@ export default function AnimatedSplash({ onFinish }: Props) {
         autoPlay
         loop={false}
         resizeMode="contain"
-        onAnimationFinish={onFinish}
+        onAnimationFinish={handleAnimationFinish}
         style={styles.animation}
       />
     </View>
@@ -23,11 +33,12 @@ export default function AnimatedSplash({ onFinish }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#000000", // cambia al color de fondo de tu animación
-    alignItems: "center",
+    flex: 1,
+    width: "100%",
+    height: "100%",
     justifyContent: "center",
-    zIndex: 999,
+    alignItems: "center",
+    backgroundColor: "#000000",
   },
   animation: {
     width: "100%",
