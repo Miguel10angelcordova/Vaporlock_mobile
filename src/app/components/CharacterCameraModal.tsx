@@ -51,14 +51,14 @@ type SpriteAnimation = {
 };
 
 /**
- * Estructura admitida:
- * personajes/
- *   cualquier-nombre/
- *     frame_00.png
- *     frame_01.png
+- Estructura admitida:
+- personajes/
+-   cualquier-nombre/
+-     frame_00.png
+-     frame_01.png
  *
- * El catálogo se construye a partir de las carpetas reales.
- * No se exige que el nombre de la carpeta coincida con un nombre fijo.
+- El catálogo se construye a partir de las carpetas reales.
+- No se exige que el nombre de la carpeta coincida con un nombre fijo.
  */
 const spriteContext = (require as any).context(
   "../personajes",
@@ -180,8 +180,8 @@ export default function CharacterCameraModal({
 
   const hasCamera = cameraPermission?.granted === true;
   const hasFrames = frames.length > 0;
-  const previewHeight = Math.max(180, screenHeight * 0.42);
-  const spriteSize = Math.min(210, Math.max(130, screenWidth * 0.43));
+  const previewHeight = Math.max(160, screenHeight * 0.34);
+  const spriteSize = Math.min(240, Math.max(160, screenWidth * 0.52));
 
   useEffect(() => {
     setFrameIndex(0);
@@ -266,8 +266,8 @@ export default function CharacterCameraModal({
   const clampY = (value: number) => Math.max(MIN_Y, Math.min(MAX_Y, value));
 
   /**
-   * El responder se crea una sola vez. La posición vive también en una ref
-   * para evitar que cada render reinicie el gesto y devuelva el sticker.
+- El responder se crea una sola vez. La posición vive también en una ref
+- para evitar que cada render reinicie el gesto y devuelva el sticker.
    */
   const panResponder = useMemo(
     () =>
@@ -279,8 +279,8 @@ export default function CharacterCameraModal({
         },
         onPanResponderMove: (_event, gesture) => {
           const next = {
-            x: Math.max(MIN_X, Math.min(MAX_X, dragOriginRef.current.x + gesture.dx)),
-            y: Math.max(MIN_Y, Math.min(MAX_Y, dragOriginRef.current.y + gesture.dy)),
+            x: clampX(dragOriginRef.current.x + gesture.dx),
+            y: clampY(dragOriginRef.current.y + gesture.dy),
           };
           offsetRef.current = next;
           setOffsetX(next.x);
@@ -658,7 +658,12 @@ export default function CharacterCameraModal({
           </View>
 
           {SPRITE_CATALOG.length > 0 ? (
-            <View style={styles.selectorGrid}>
+            <ScrollView
+              style={styles.selectorScroll}
+              contentContainerStyle={styles.selectorGrid}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
               {SPRITE_CATALOG.map((animation) => {
                 const active = selectedAnimationId === animation.id;
                 const thumbnail = animation.frames[0]?.source;
@@ -666,25 +671,48 @@ export default function CharacterCameraModal({
                 return (
                   <TouchableOpacity
                     key={animation.id}
-                    style={[styles.characterCard, active && styles.characterCardActive]}
+                    style={[
+                      styles.characterCard,
+                      active && styles.characterCardActive,
+                    ]}
                     onPress={() => handleSelectAnimation(animation.id)}
                     disabled={busy}
                     activeOpacity={0.78}
                   >
                     <View style={styles.characterThumbnail}>
                       {thumbnail ? (
-                        <Image source={thumbnail} style={styles.characterThumbnailImage} resizeMode="contain" />
+                        <Image
+                          source={thumbnail}
+                          style={styles.characterThumbnailImage}
+                          resizeMode="contain"
+                        />
                       ) : null}
-                      {active && <View style={styles.selectedMark}><Ionicons name="checkmark" size={12} color={COLORS.ink} /></View>}
+                      {active && (
+                        <View style={styles.selectedMark}>
+                          <Ionicons
+                            name="checkmark"
+                            size={12}
+                            color={COLORS.ink}
+                          />
+                        </View>
+                      )}
                     </View>
-                    <Text style={[styles.characterCardName, active && styles.characterCardNameActive]} numberOfLines={1}>
+                    <Text
+                      style={[
+                        styles.characterCardName,
+                        active && styles.characterCardNameActive,
+                      ]}
+                      numberOfLines={1}
+                    >
                       {animation.name}
                     </Text>
-                    <Text style={styles.characterCardMeta}>{animation.frames.length} fotogramas</Text>
+                    <Text style={styles.characterCardMeta}>
+                      {animation.frames.length} fotogramas
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
           ) : (
             <View style={styles.emptyCatalog}>
               <Text style={styles.infoText}>
@@ -695,7 +723,11 @@ export default function CharacterCameraModal({
 
           <View style={styles.footer}>
             <View style={styles.captureDescription}>
-              <Ionicons name="aperture-outline" size={18} color={COLORS.copper} />
+              <Ionicons
+                name="aperture-outline"
+                size={18}
+                color={COLORS.copper}
+              />
               <Text style={styles.captureDescriptionText}>
                 CAPTURA CON PERSONAJE
               </Text>
@@ -704,11 +736,21 @@ export default function CharacterCameraModal({
             <TouchableOpacity
               style={[
                 styles.captureButton,
-                (!hasCamera || busy || loadingSprite || !hasFrames || spriteError) &&
+                (!hasCamera ||
+                  busy ||
+                  loadingSprite ||
+                  !hasFrames ||
+                  spriteError) &&
                   styles.captureButtonDisabled,
               ]}
               onPress={() => void handleTakePhoto()}
-              disabled={!hasCamera || busy || loadingSprite || !hasFrames || spriteError}
+              disabled={
+                !hasCamera ||
+                busy ||
+                loadingSprite ||
+                !hasFrames ||
+                spriteError
+              }
             >
               {busy ? (
                 <ActivityIndicator color={COLORS.ink} />
@@ -779,7 +821,7 @@ const styles = StyleSheet.create({
   },
   cameraBox: {
     flex: 1,
-    minHeight: 180,
+    minHeight: 160,
     marginHorizontal: 12,
     marginTop: 12,
     marginBottom: 10,
@@ -930,8 +972,9 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   controlPanel: {
+    maxHeight: "62%",
     paddingHorizontal: 13,
-    paddingTop: 12,
+    paddingTop: 10,
     paddingBottom: 8,
     backgroundColor: COLORS.panel,
     borderTopWidth: 2,
@@ -989,11 +1032,15 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "800",
   },
+  selectorScroll: {
+    maxHeight: 215,
+    marginBottom: 6,
+  },
   selectorGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "flex-start",
-    paddingBottom: 12,
+    paddingBottom: 6,
   },
   characterCard: {
     width: "31.5%",

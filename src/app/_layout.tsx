@@ -1,9 +1,9 @@
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StyleSheet, View } from "react-native";
 import AnimatedSplash from "./components/splashscreen/AnimatedSplash";
+import CustomHeader from "./components/CustomHeader";
 import { AudioProvider } from "../context/AudioContext";
 
 void SplashScreen.preventAutoHideAsync().catch((error) => {
@@ -65,6 +65,8 @@ export default function RootLayout() {
             animation: "fade",
           }}
         />
+
+        <CustomHeader />
 
         {!animationDone && (
           <View style={styles.splashOverlay}>

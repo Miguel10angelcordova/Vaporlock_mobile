@@ -227,7 +227,7 @@ export default function CharactersScreen() {
           <View style={styles.pageHeading}>
             <View style={styles.headingCopy}>
               <Text style={styles.eyebrow}>REGISTRO DE PERSONAJES</Text>
-              <Text style={[styles.pageTitle, { fontSize: isCompact ? 43 : isTablet ? 62 : 54 }]}>PERSONAJES</Text>
+              <Text style={[styles.pageTitle, { fontSize: isCompact ? 16 : isTablet ? 44 : 36 }]}>PERSONAJES</Text>
               <Text style={styles.pageDescription}>Conoce a quienes habitan Metronia, sus historias y los atributos que definen su papel en la aventura.</Text>
             </View>
             <View style={styles.totalPanel}>

@@ -271,7 +271,7 @@ export default function ConfigScreen() {
             <Text
               style={[
                 styles.pageTitle,
-                { fontSize: isCompact ? 38 : isTablet ? 58 : 48 },
+                { fontSize: isCompact ? 16 : isTablet ? 44 : 36 },
               ]}
             >
               CONFIGURACIÓN
